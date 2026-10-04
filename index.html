@@ -2013,6 +2013,7 @@
   }
 
   let modalOnOk = null;
+  let modalOnCancel = null;
   function showModal(opts){
     $("modalTitle").textContent = opts.title || "";
     $("modalText").textContent = opts.text || "";
@@ -2021,11 +2022,18 @@
     cancel.textContent = opts.cancel || "ОТМЕНА";
     cancel.style.display = opts.cancel === null ? "none" : "";
     modalOnOk = opts.onOk || null;
+    modalOnCancel = opts.onCancel || null;
     $("modalOverlay").classList.add("show");
   }
   function closeModal(){
     $("modalOverlay").classList.remove("show");
     modalOnOk = null;
+    modalOnCancel = null;
+  }
+  function cancelModal(){
+    const fn = modalOnCancel;
+    closeModal();
+    if(fn) fn();
   }
 
   const RANKS = [
@@ -2256,7 +2264,7 @@
     }
   }
   function markDailyPlayed(score, correct){
-    const today = todaySeed();
+    const today = state.dailyKey || todaySeed();
     progress.dailyPlayedKey = today;
     const hist = (progress.dailyHistory || []).filter(h=>h.k !== today);
     hist.push({ k: today, s: sanitizeScore(score), c: correct });
@@ -2746,6 +2754,15 @@
       }
       state.order = daily ? buildDailyOrder() : buildOrder();
       state.mode = daily ? "daily" : "solo";
+      state.dailyKey = null;
+      if(daily){
+        // Попытка засчитывается сразу: выход или перезапуск не дают переиграть тот же набор
+        state.dailyKey = todaySeed();
+        progress.dailyPlayedKey = state.dailyKey;
+        persistProgress();
+        flushProgressSave();
+        refreshDailyDot();
+      }
       state.idx = 0;
     state.score = 0;
     state.correctCount = 0;
@@ -3827,6 +3844,18 @@
   $("btn-duel-again").addEventListener("click", ()=>startRoundWithLoading(()=>startDuel()));
   $("btn-duel-home").addEventListener("click", ()=>showScreen("start"));
   $("btn-quiz-exit").addEventListener("click", ()=>{
+    if(state.mode !== "daily"){ exitQuizToMenu(); return; }
+    pauseApp("exitask");
+    showModal({
+      title: "Выйти из ежедневного квиза?",
+      text: "Попытка на сегодня уже засчитана. Если выйдешь, результат не попадёт в рейтинг дня, а сыграть снова можно будет только после 03:00 по Москве.",
+      ok: "ВЫЙТИ",
+      cancel: "ИГРАТЬ ДАЛЬШЕ",
+      onOk: ()=>{ resumeApp("exitask"); exitQuizToMenu(); },
+      onCancel: ()=>resumeApp("exitask")
+    });
+  });
+  function exitQuizToMenu(){
     clearInterval(state.timer); state.timer = null;
     clearTimeout(state.chaosTimeout); state.chaosTimeout = null;
     state.chaosSwap = null;
@@ -3836,7 +3865,7 @@
     if(_wagerCleanup) _wagerCleanup();
     flushProgressSave();
     showScreen("start");
-  });
+  }
   $("btn-duel-exit").addEventListener("click", ()=>{
     clearInterval(duel.timer); duel.timer = null;
     focusPause.duelElapsed = null;
@@ -3908,8 +3937,8 @@
     closeModal();
     if(fn) fn();
   });
-  $("modalCancel").addEventListener("click", closeModal);
-  $("modalOverlay").addEventListener("click", (e)=>{ if(e.target === $("modalOverlay")) closeModal(); });
+  $("modalCancel").addEventListener("click", cancelModal);
+  $("modalOverlay").addEventListener("click", (e)=>{ if(e.target === $("modalOverlay")) cancelModal(); });
 
   $("btn-rules").addEventListener("click", ()=>{
     $("screen-rules").scrollTop = 0;
