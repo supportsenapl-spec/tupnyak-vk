@@ -1022,6 +1022,10 @@
     text-decoration:underline; text-underline-offset:3px; opacity:.75; white-space:nowrap;
   }
   .menu-link:active{ opacity:1; }
+  .profile-delete{ width:100%; max-width:380px; display:flex; flex-direction:column; align-items:center; gap:2px; margin-top:6px; }
+  .profile-delete .menu-link{ font-size:13px; }
+  .profile-delete-note{ font-family:'Space Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size:10px; color:#5a5142; text-align:center; }
+  .lb-retry{ margin-top:10px; font-size:14px; padding:8px 18px; }
   .hint-btn{
     flex:0 0 auto;
     font-family:'Space Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-weight:700; font-size:12px;
@@ -1291,6 +1295,11 @@
     <div class="profile-section-title">ДОСТИЖЕНИЯ</div>
     <div class="profile-ach-grid" id="profAchGrid"></div>
 
+    <div class="profile-delete">
+      <button class="menu-link" id="btn-delete-data" type="button">🗑 Удалить мои данные</button>
+      <div class="profile-delete-note">Сотрёт прогресс, ранг, подсказки и результат в рейтинге дня</div>
+    </div>
+
     <div class="profile-back-dock"><button class="btn primary" id="btn-profile-back">НАЗАД</button></div>
   </div>
 
@@ -1316,7 +1325,7 @@
       <h3>🏅 Ранги и достижения</h3>
       <p>За игры начисляется опыт (XP): за верные ответы, за завершённый раунд, за ежедневный квиз, за рекорд и за достижения. Ранги открывают новые рамки профиля. Профиль открывается кнопкой с рангом в меню.</p>
       <h3>⏸ Меню и звук</h3>
-      <p>Кнопка ✕ в любой момент возвращает в главное меню. Громкость, музыку и звуки можно настроить внизу меню. Прогресс сохраняется в твоём аккаунте автоматически.</p>
+      <p>Кнопка ✕ в любой момент возвращает в главное меню. Громкость, музыку и звуки можно настроить внизу меню. Прогресс сохраняется в твоём аккаунте автоматически. Удалить свои данные можно в профиле.</p>
     </div>
     <div class="profile-back-dock"><button class="btn primary" id="btn-rules-back">НАЗАД</button></div>
   </div>
@@ -2084,6 +2093,52 @@
     applyRankCosmetics($("btn-profile"), idx);
   }
 
+  let deletePending = false;
+  function askDeleteMyData(){
+    if(deletePending) return;
+    showModal({
+      title: "🗑 Удалить мои данные?",
+      text: "Сотрём весь прогресс: опыт и ранг, рекорд, статистику, достижения, подсказки, историю ежедневного квиза и твой результат в рейтинге дня. Отменить это нельзя.",
+      ok: "УДАЛИТЬ",
+      cancel: "ОТМЕНА",
+      onOk: deleteMyData
+    });
+  }
+  async function deleteMyData(){
+    if(deletePending) return;
+    deletePending = true;
+    showLoader("Удаляем данные…");
+    try{
+      if(isVK && launchParams.get("sign")){
+        try{ await lbRequest({ delete: true }); }
+        catch(e){ showToast("Не удалось удалить данные. Проверь интернет и попробуй ещё раз."); return; }
+      }
+      const today = todaySeed();
+      const playedToday = progress.dailyPlayedKey === today;
+      if(progressSaveTimer){ clearTimeout(progressSaveTimer); progressSaveTimer = null; }
+      if(cloudTimer){ clearTimeout(cloudTimer); cloudTimer = null; }
+      CLOUD_KEYS.forEach(k=>{ delete cloudPending[k]; });
+      progress = defaultProgress();
+      cachedBest = 0;
+      CLOUD_KEYS.forEach(k=>{ try{ localStorage.removeItem(LOCAL_PREFIX + k); }catch(e){} });
+      try{ localStorage.removeItem("tupnyak_progress"); localStorage.removeItem("tupnyak_best"); }catch(e){}
+      let cloudFailed = false;
+      if(cloudOk){
+        for(const k of CLOUD_KEYS){
+          try{ await vkSend("VKWebAppStorageSet", { key: k, value: "" }, 8000); cloudSent[k] = ""; }
+          catch(e){ cloudFailed = true; }
+        }
+      }
+      // Одна попытка ежедневного квиза в день остаётся и после удаления
+      if(playedToday){ progress.dailyPlayedKey = today; persistProgress(); }
+      renderProfile(); renderBest(); renderRankPill(); updateRewardAdBtn(); refreshDailyDot();
+      showToast(cloudFailed ? "Данные удалены на устройстве. Облако не ответило — попробуй ещё раз позже." : "Готово, твои данные удалены.");
+    } finally {
+      hideLoader();
+      deletePending = false;
+    }
+  }
+
   function renderProfile(){
     const idx = rankForXp(progress.xp);
     const rank = RANKS[idx];
@@ -2330,9 +2385,12 @@
     const token = ++lbLoadToken;
     renderDailyHistory();
     const wrap = $("lbGlobal");
-    if(!isVK || !launchParams.get("sign")){ wrap.style.display = "none"; return; }
     wrap.style.display = "";
     $("lbCount").textContent = "";
+    if(!isVK || !launchParams.get("sign")){
+      $("lbList").innerHTML = '<div class="lb-empty">Рейтинг дня работает только в игре ВКонтакте.</div>';
+      return;
+    }
     $("lbList").innerHTML = '<div class="lb-empty"><span class="spinner small"></span> Загрузка…</div>';
     let data = null;
     try{ data = await retryPendingDaily(); }catch(e){ data = null; }
@@ -2340,7 +2398,12 @@
       try{ data = await lbRequest({}); }catch(e){ data = null; }
     }
     if(token !== lbLoadToken) return;
-    if(!data){ wrap.style.display = "none"; return; }
+    if(!data){
+      const list = $("lbList");
+      list.innerHTML = '<div class="lb-empty">😵 Не удалось загрузить рейтинг дня. Проверь интернет и попробуй ещё раз.<br><button class="btn secondary lb-retry" type="button">ПОВТОРИТЬ</button></div>';
+      list.querySelector(".lb-retry").addEventListener("click", loadLeaderboard);
+      return;
+    }
     renderGlobalBoard(data);
   }
 
@@ -3831,6 +3894,7 @@
     showScreen("profile");
   });
   $("btn-profile-back").addEventListener("click", ()=>showScreen("start"));
+  $("btn-delete-data").addEventListener("click", askDeleteMyData);
 
   $("btn-reward-ad").addEventListener("click", ()=>{
     if(!storageReady){
