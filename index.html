@@ -1318,7 +1318,7 @@
       <h3>😬 Кринж-метр</h3>
       <p>Растёт от верных ответов, особенно с риском, и падает от ошибок. На двух верхних уровнях каждый верный ответ приносит ещё +15% очков.</p>
       <h3>💡 Подсказка 50/50</h3>
-      <p>В обычной игре убирает два неверных ответа. Одна подсказка есть с самого начала. Ещё по одной дают за ежедневный квиз и за каждый новый ранг. Можно получить и за просмотр рекламы в меню. Подсказок может быть не больше 9. В ежедневном квизе, дуэли и тупняк-раунде подсказки не работают.</p>
+      <p>В обычной игре убирает два неверных ответа. Одна подсказка есть с самого начала. Ещё по одной дают за ежедневный квиз и за каждый новый ранг. Можно получить и за просмотр рекламы: в меню или прямо в вопросе, когда подсказки закончились (кнопка 📺 50/50). Подсказок может быть не больше 9. В ежедневном квизе, дуэли и тупняк-раунде подсказки не работают.</p>
       <h3>📅 Ежедневный квиз</h3>
       <p>Один набор вопросов на всех, одна попытка в день. Новый квиз каждый день в 03:00 по Москве. Результаты и рейтинг дня открываются кнопкой 🏆.</p>
       <h3>👥 Дуэль</h3>
@@ -1630,9 +1630,33 @@
     profile: $("screen-profile"),
     rules: $("screen-rules")
   };
+  // ---- Баннер: только на экранах результатов (правила 5.1.4) ----
+  // Сверху и в режиме resize: игра сжимается на высоту баннера, баннер ничего не перекрывает.
+  // Сверху, а не снизу: последний тап перед результатами был по вариантам ответа внизу экрана,
+  // баннер не должен появиться под пальцем (5.1.4.2 б). Во время вопросов баннера нет.
+  let bannerWanted = false, bannerAttempted = false, bannerTimer = null;
+  function hideBanner(){
+    if(!bannerAttempted) return;
+    bannerAttempted = false;
+    vkSend("VKWebAppHideBannerAd", {}, 4000).catch(()=>{});
+  }
+  function syncBanner(name){
+    const want = isVK && (name === "results" || name === "duelResults");
+    if(want === bannerWanted) return;
+    bannerWanted = want;
+    clearTimeout(bannerTimer);
+    if(!want){ hideBanner(); return; }
+    bannerTimer = setTimeout(async ()=>{
+      if(!bannerWanted) return;
+      bannerAttempted = true;
+      try{ await vkSend("VKWebAppShowBannerAd", { banner_location: "top", layout_type: "resize" }, 10000); }catch(e){}
+      if(!bannerWanted) hideBanner();
+    }, 800);
+  }
   function showScreen(name){
     Object.values(screens).forEach(s=>s.classList.remove("active"));
     screens[name].classList.add("active");
+    syncBanner(name);
     if(name==="quiz" || name==="duel") startMusic(); else stopMusic();
     if(name==="start"){ renderBest(); renderRankPill(); updateRewardAdBtn(); refreshDailyDot(); }
   }
@@ -1792,6 +1816,7 @@
       totalTimedCount: 0,
       catStats: {},
       achievements: {},
+      favAskedAt: 0,
       recentQIdx: [],
       hints: HINTS_START,
       dailyPlayedKey: null,
@@ -1823,6 +1848,7 @@
     p.pendingDaily = (p.pendingDaily && typeof p.pendingDaily === "object" && typeof p.pendingDaily.key === "string") ? p.pendingDaily : null;
     p.hints = Math.max(0, Math.min(HINTS_MAX, Math.floor(Number(p.hints)) || 0));
     p.t = Number(p.t) || 0;
+    p.favAskedAt = Number(p.favAskedAt) || 0;
     delete p.xpBoost;
     return p;
   }
@@ -1926,6 +1952,7 @@
   }
 
   const AD_MIN_GAP_MS = 60000;
+  let quizAdPending = false;   // идёт ролик за подсказку прямо в вопросе
   let lastAdAt = Date.now();
   let roundsSinceAd = 0;
   let adFlowPending = false;
@@ -1939,7 +1966,7 @@
   }
   function startRoundWithLoading(next){
     if(adFlowPending) return;
-    if(!isVK || roundsSinceAd < 2 || Date.now() - lastAdAt < AD_MIN_GAP_MS){ next(); return; }
+    if(!isVK || roundsSinceAd < 1 || Date.now() - lastAdAt < AD_MIN_GAP_MS){ next(); return; }
     adFlowPending = true;
     roundsSinceAd = 0;
     showLoader("Загружаем новые вопросы…");
@@ -2806,8 +2833,11 @@
     const btn = $("btn-hint");
     if(!btn) return;
     btn.style.display = state.mode === "solo" ? "" : "none";
-    $("hintCount").textContent = progress.hints;
-    btn.disabled = !hintAvailableNow();
+    const adHint = isVK && progress.hints <= 0;
+    $("hintCount").textContent = adHint ? "📺" : progress.hints;
+    btn.setAttribute("aria-label", adHint ? "Посмотреть рекламу и убрать два неверных ответа" : "Подсказка 50/50");
+    btn.title = adHint ? "Реклама → убрать 2 неверных" : "";
+    btn.disabled = !hintAvailableNow() || quizAdPending;
     btn.classList.toggle("empty", progress.hints <= 0);
   }
   function applyHintRemoval(){
@@ -2818,12 +2848,41 @@
       btn.disabled = removed;
     });
   }
+  // ---- Подсказка за рекламу прямо в вопросе (5.1.5.1 б) ----
+  // Только по нажатию игрока на «📺 50/50», когда подсказок 0. Таймер на паузе, пока идёт ролик.
+  // После просмотра подсказка сразу применяется к текущему вопросу. Очков и XP не даёт.
+  async function rewardedHintInQuiz(){
+    if(quizAdPending || rewardedPending) return;
+    quizAdPending = true;
+    const tok = state.qToken;
+    pauseApp("ad");
+    renderHintBtn();
+    let ok = false;
+    try{
+      const c = await vkSend("VKWebAppCheckNativeAds", { ad_format: "reward" }, 3000).catch(()=>null);
+      if(c && c.result){
+        const r = await vkSend("VKWebAppShowNativeAds", { ad_format: "reward" }, 90000);
+        ok = !!(r && r.result);
+      }
+    }catch(e){}
+    lastAdAt = Date.now();
+    if(ok){
+      grantHints(1);
+      persistProgress();
+      scheduleCloudFlush(true);
+      updateRewardAdBtn();
+    }
+    quizAdPending = false;
+    resumeApp("ad");
+    if(ok && tok === state.qToken) useHint();
+    else if(!ok) showToast("Реклама сейчас недоступна. Попробуй позже.");
+    renderHintBtn();
+  }
   function useHint(){
     if(!hintAvailableNow()) return;
     if(progress.hints <= 0){
-      showToast(isVK
-        ? "Подсказки закончились. Новые: за ежедневный квиз, за новый ранг или за рекламу в меню."
-        : "Подсказки закончились. Новые: за ежедневный квиз и за новый ранг.");
+      if(isVK){ rewardedHintInQuiz(); return; }
+      showToast("Подсказки закончились. Новые: за ежедневный квиз и за новый ранг.");
       return;
     }
     const item = state.order[state.idx];
@@ -3342,6 +3401,7 @@
     if(ratio >= 0.6 || isNewBest) resultsScreenEl.classList.add("celebrate");
     else if(ratio < 0.35) resultsScreenEl.classList.add("slump");
     showScreen("results");
+    maybeAskFavorites();
     if(state.mode === "daily") markDailyPlayed(state.score, state.correctCount);
     flushProgressSave();
     if(ratio >= 0.6) sfxWin();
@@ -3803,6 +3863,23 @@
     }
   }
 
+  // ---- Избранное (2.6.3): с 3-й игры, без бонуса, отказ — следующий вопрос через 30 дней ----
+  let favAdded = launchParams.get("vk_is_favorite") === "1";
+  function maybeAskFavorites(){
+    if(!isVK || favAdded) return;
+    if(progress.totalGames < 3) return;
+    if(Date.now() - (progress.favAskedAt || 0) < 30*24*3600*1000) return;
+    setTimeout(async ()=>{
+      const onResults = screens.results.classList.contains("active") || screens.duelResults.classList.contains("active");
+      if(!onResults || pauseReasons.size > 0) return;
+      progress.favAskedAt = Date.now();
+      persistProgress();
+      try{
+        const r = await vkSend("VKWebAppAddToFavorites", {}, 120000);
+        if(r && r.result) favAdded = true;
+      }catch(e){}
+    }, 2500);
+  }
   function endDuel(){
     clearInterval(duel.timer);
     duel.timer = null;
@@ -3847,6 +3924,7 @@
 
     $("screen-duel-results").classList.toggle("celebrate", s1 !== s2);
     showScreen("duelResults");
+    maybeAskFavorites();
     setTimeout(()=>showXpQueue(xpQueue), 500);
     noteRoundFinished();
   }
