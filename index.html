@@ -1005,6 +1005,14 @@
     .wager-btn{ flex:1; min-width:0; flex-direction:column; text-align:center; padding:6px; gap:4px; }
     .wager-info{ align-items:center; text-align:center; }
   }
+  @media (max-height:520px){
+    #screen-results .result-emoji{ display:none; }
+    .challenge-card .cs{ display:none; }
+    .wager-card{ padding:12px 12px; }
+    .wager-title{ margin-bottom:8px; }
+    .wager-choices{ gap:6px; }
+    .wager-btn{ padding:7px 10px; }
+  }
   .age-badge{
     position:absolute; top:12px; left:12px; z-index:5;
     font-family:'Baloo 2', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; font-weight:800; font-size:13px;
@@ -1277,7 +1285,7 @@
       <div class="profile-rank-emoji" id="profRankEmoji">🥔</div>
       <div class="profile-rank-name" id="profRankName">Картошка</div>
       <div class="profile-rank-bar-track"><div class="profile-rank-bar-fill" id="profRankBarFill"></div></div>
-      <div class="profile-rank-sub" id="profRankSub">0 / 500 XP до ранга «Человек»</div>
+      <div class="profile-rank-sub" id="profRankSub">0 / 400 XP до ранга «Человек»</div>
     </div>
 
     <div class="profile-section-title">СТАТИСТИКА</div>
@@ -1312,7 +1320,7 @@
       <h3>⚡ Очки</h3>
       <p>Верный ответ даёт 100 очков и бонус за скорость, до +60. Серия верных ответов подряд увеличивает множитель, до ×1,6. Ошибка или конец времени сбрасывают серию.</p>
       <h3>🥔 Ставка перед вопросом</h3>
-      <p>Со второго вопроса выбираешь уровень риска. «Обычно»: обычные очки, ошибка ничего не отнимает. «Риск»: очки ×2, но ошибка отнимает половину того, что дал бы верный ответ. «Тупняк»: очки ×3 и на четверть меньше времени, а ошибка отнимает в полтора раза больше. Все множители вместе дают не больше ×4.</p>
+      <p>Со второго вопроса выбираешь уровень риска. «Обычно»: обычные очки, ошибка ничего не отнимает. «Риск»: очки ×2, но ошибка отнимает половину обычной награды за вопрос. «Тупняк»: очки ×3 и на четверть меньше времени, а ошибка отнимает полторы обычные награды. Все множители вместе дают не больше ×4, сверху может добавиться только бонус кринж-метра.</p>
       <h3>🌀 Особые раунды</h3>
       <p>Иногда вопрос становится особым раундом, о нём предупредит баннер. 🙃 Тупняк-раунд: нужно нажать любой НЕправильный ответ. 🌀 Хаос-раунд: на середине таймера ответы меняются местами. ⚡ Блиц-раунд: времени вдвое меньше, очков вдвое больше. 💎 Бонус-раунд: очков втрое больше, но и ошибка стоит дороже.</p>
       <h3>😬 Кринж-метр</h3>
@@ -1671,6 +1679,12 @@
   const vkUserId = launchParams.get("vk_user_id") || "";
   const vkAppId = launchParams.get("vk_app_id") || "";
   if(/^mobile_(android|iphone|ipad)/.test(vkPlatform)) document.body.classList.add("vk-mobile-app");
+  const isOK = vkClient === "ok" || /(^|\.)ok\.ru/i.test(document.referrer || "");
+  const canShare = isVK && !isOK;
+  if(!canShare){
+    const card = document.querySelector(".challenge-card"); if(card) card.style.display = "none";
+    const inv = document.getElementById("btn-invite"); if(inv) inv.style.display = "none";
+  }
 
   let serverTimeOffsetMs = 0;
   (function(){
@@ -1969,10 +1983,13 @@
     if(!isVK || roundsSinceAd < 1 || Date.now() - lastAdAt < AD_MIN_GAP_MS){ next(); return; }
     adFlowPending = true;
     roundsSinceAd = 0;
+    bannerWanted = false;
+    clearTimeout(bannerTimer);
+    hideBanner();
     showLoader("Загружаем новые вопросы…");
     pauseApp("ad");
-    const finish = ()=>{
-      lastAdAt = Date.now();
+    const finish = (shown)=>{
+      if(shown) lastAdAt = Date.now();
       resumeApp("ad");
       hideLoader();
       adFlowPending = false;
@@ -1984,7 +2001,7 @@
           if(!r || !r.result) return null;
           return vkSend("VKWebAppShowNativeAds", { ad_format: "interstitial" }, 60000);
         })
-        .catch(()=>null)
+        .then(r=>!!(r && r.result), ()=>false)
         .then(finish);
     }, 700);
   }
@@ -2067,10 +2084,10 @@
   const RANKS = [
     {min:0,     name:"Картошка",        emoji:"🥔", reward:null},
     {min:400,   name:"Человек",          emoji:"🧍", reward:"Бронзовая рамка профиля"},
-    {min:1200,  name:"Мозг",             emoji:"🧠", reward:"Серебряная рамка + значок мыслителя"},
+    {min:1200,  name:"Мозг",             emoji:"🧠", reward:"Серебряная рамка профиля"},
     {min:2800,  name:"Гений",            emoji:"🎓", reward:"Золотая рамка профиля"},
-    {min:5500,  name:"Учёный Тупняка",   emoji:"🥼", reward:"Лабораторная рамка + фраза маскота"},
-    {min:10000, name:"Космический Мозг", emoji:"👽", reward:"Космическая рамка со свечением"},
+    {min:5500,  name:"Учёный Тупняка",   emoji:"🥼", reward:"Синяя рамка профиля"},
+    {min:10000, name:"Космический Мозг", emoji:"👽", reward:"Фиолетовая рамка профиля"},
     {min:18000, name:"Тупняк-Легенда",   emoji:"🌌", reward:"Легендарная переливающаяся рамка"}
   ];
   function rankForXp(xp){
@@ -2424,7 +2441,7 @@
     wrap.style.display = "";
     $("lbCount").textContent = "";
     if(!isVK || !launchParams.get("sign")){
-      $("lbList").innerHTML = '<div class="lb-empty">Рейтинг дня работает только в игре ВКонтакте.</div>';
+      $("lbList").innerHTML = '<div class="lb-empty">Рейтинг дня сейчас недоступен. Твои результаты — ниже.</div>';
       return;
     }
     $("lbList").innerHTML = '<div class="lb-empty"><span class="spinner small"></span> Загрузка…</div>';
@@ -2605,6 +2622,13 @@
   window.addEventListener("blur", ()=>{ windowBlurred = true; applyAudioMute(); });
   window.addEventListener("focus", ()=>{ windowBlurred = false; applyAudioMute(); });
 
+  const PIN_LAST_RE = /вышеперечисленн|^(всё|все) (сразу|причины сразу)$|^и отложены, и не начинались$/i;
+  function shuffleOpts(item){
+    const order = shuffle([0,1,2,3]);
+    const pin = order.findIndex(i=>PIN_LAST_RE.test(item.opts[i]));
+    if(pin !== -1 && pin !== 3){ const v = order.splice(pin,1)[0]; order.push(v); }
+    return order;
+  }
   function shuffle(arr){
     const a = arr.slice();
     for(let i=a.length-1;i>0;i--){
@@ -2811,16 +2835,10 @@
       playBtn.disabled = false;
       dailyBtn.disabled = hasPlayedDailyToday();
       playBtn.textContent = oldPlayText;
-      const dailyPlayed = hasPlayedDailyToday();
-      const dailyLabel = $("dailyBtnLabel");
-      if(dailyLabel) dailyLabel.textContent = dailyPlayed ? "📅 ЕЖЕДНЕВНЫЙ · СЫГРАНО СЕГОДНЯ" : "📅 ЕЖЕДНЕВНЫЙ КВИЗ";
-      if(dailyLabel){
-        dailyLabel.textContent = dailyPlayed ? "📅 ЕЖЕДНЕВНЫЙ · СЫГРАНО СЕГОДНЯ" : "📅 ЕЖЕДНЕВНЫЙ КВИЗ";
-      } else {
-        dailyBtn.textContent = oldDailyText;
-      }
+      if(!$("dailyBtnLabel")) dailyBtn.textContent = oldDailyText;
       const dailyDot = $("dailyNewDot");
       if(dailyDot && dailyDot.parentNode !== dailyBtn) dailyBtn.appendChild(dailyDot);
+      refreshDailyDot();
     }
   }
 
@@ -2881,7 +2899,18 @@
   function useHint(){
     if(!hintAvailableNow()) return;
     if(progress.hints <= 0){
-      if(isVK){ rewardedHintInQuiz(); return; }
+      if(isVK){
+        pauseApp("hintask");
+        showModal({
+          title: "📺 Подсказка за рекламу",
+          text: "Посмотри короткую рекламу — и два неверных ответа в этом вопросе исчезнут. Таймер стоит на паузе.",
+          ok: "СМОТРЕТЬ",
+          cancel: "НЕ НАДО",
+          onOk: ()=>{ resumeApp("hintask"); rewardedHintInQuiz(); },
+          onCancel: ()=>resumeApp("hintask")
+        });
+        return;
+      }
       showToast("Подсказки закончились. Новые: за ежедневный квиз и за новый ранг.");
       return;
     }
@@ -2922,8 +2951,7 @@
     const baseTimeLimit = state.twistType === "speed" ? Math.round(TIME_PER_Q*0.5) : TIME_PER_Q;
 
     const letters = ["А","Б","В","Г"];
-    const idxArr = [0,1,2,3];
-    let shuffledIdx = shuffle(idxArr);
+    let shuffledIdx = shuffleOpts(item);
     let correctPos = shuffledIdx.indexOf(item.a);
     const isInverseRound = state.twistType === "inverse";
 
@@ -2950,6 +2978,9 @@
 
     const quizBody = $("quizBody");
     quizBody.classList.add("hide-content");
+    const tf = $("timerFill");
+    tf.style.background = "var(--green)";
+    tf.style.transform = "scaleX(1)";
     renderHintBtn();
 
     const isVeryFirstQuestion = state.idx === 0;
@@ -3015,7 +3046,9 @@
       overlay.classList.remove("show");
       _wagerCleanup = null;
     }
+    const shownAt = performance.now();
     function handler(e){
+      if(performance.now() - shownAt < 400) return;
       const wager = e.currentTarget.dataset.wager;
       cleanup();
       if(wager === "idiot"){ sfxWagerHigh(); reactQuizMascot("risk"); }
@@ -3062,7 +3095,7 @@
     if(state.locked) return;
     const optsWrap = $("options");
     const letters = ["А","Б","В","Г"];
-    const newShuffled = shuffle([0,1,2,3]);
+    const newShuffled = shuffleOpts(item);
     const newCorrectPos = newShuffled.indexOf(item.a);
     [...optsWrap.children].forEach((btn, pos)=>{
       const origIdx = newShuffled[pos];
@@ -3431,7 +3464,7 @@
   }
   let sharePending = false;
   async function shareChallenge(){
-    if(sharePending) return;
+    if(sharePending || !canShare) return;
     const text = "Я набрал " + state.score + " очков в ТУПНЯК (" + state.correctCount + "/" + state.order.length + " верно). Слабо повторить?";
     if(isVK){
       sharePending = true;
@@ -3461,7 +3494,7 @@
     showToast("Не удалось открыть отправку.");
   }
   async function inviteFriends(){
-    if(!isVK){ showToast("Приглашения работают внутри игры ВКонтакте."); return; }
+    if(!canShare) return;
     if(sharePending) return;
     sharePending = true;
     pauseApp("share");
@@ -3685,8 +3718,7 @@
     triggerPop($("duelQCard"));
 
     const letters = ["А","Б","В","Г"];
-    const idxArr = [0,1,2,3];
-    const shuffledIdx = shuffle(idxArr);
+    const shuffledIdx = shuffleOpts(item);
     duel.correctPos = shuffledIdx.indexOf(item.a);
 
     const wrap = $("duelOptionsList");
@@ -3808,9 +3840,6 @@
     const bothCorrect = (duel.p1Choice===duel.correctPos) && (duel.p2Choice===duel.correctPos);
     if(anyoneCorrect) sfxCorrect(); else sfxWrong();
 
-    const item = duel.order[duel.idx];
-    trackCategoryAnswer(item, duel.p1Choice === duel.correctPos);
-    trackCategoryAnswer(item, duel.p2Choice === duel.correctPos);
 
     if(duel.p1Choice === duel.correctPos){
       duel.p1.streak += 1;
@@ -3858,7 +3887,7 @@
   // ---- Избранное (2.6.3): с 3-й игры, без бонуса, отказ — следующий вопрос через 30 дней ----
   let favAdded = launchParams.get("vk_is_favorite") === "1";
   function maybeAskFavorites(){
-    if(!isVK || favAdded) return;
+    if(!isVK || isOK || favAdded) return;
     if(progress.totalGames < 3) return;
     if(Date.now() - (progress.favAskedAt || 0) < 30*24*3600*1000) return;
     setTimeout(async ()=>{
