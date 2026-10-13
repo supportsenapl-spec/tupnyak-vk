@@ -3438,14 +3438,6 @@
       pauseApp("share");
       try{
         const link = appLink();
-        if(vkClient !== "ok"){
-          try{
-            await vkSend("VKWebAppShowWallPostBox", link ? { message: text, attachments: link } : { message: text }, 120000);
-            return;
-          }catch(e){
-            if(isUserCancel(e)) return;
-          }
-        }
         try{
           await vkSend("VKWebAppShare", link ? { link } : {}, 120000);
           return;
